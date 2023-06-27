@@ -144,11 +144,15 @@ const getStreamedResponse = async (
     // Update the chat state with the new message tokens.
     streamedResponse += decode(value)
 
-    if (streamedResponse.startsWith('{"function_call":')) {
+    // Check to see if there is a function, so we don't bother parsing if there isn't one.
+    const functionStart = streamedResponse.indexOf('{')
+    if (functionStart !== -1) {
+      const matches = /(.*?)(?:({"function_call".*?}})(.*))?$/gs.exec(streamedResponse)
+      responseMessage.content = `${matches?.[1]??''}${matches?.[3]??''}`
       // While the function call is streaming, it will be a string.
-      responseMessage['function_call'] = streamedResponse
+      responseMessage.function_call = matches?.[2]
     } else {
-      responseMessage['content'] = streamedResponse
+      responseMessage.content = streamedResponse
     }
 
     mutate([...chatRequest.messages, { ...responseMessage }])
@@ -160,13 +164,13 @@ const getStreamedResponse = async (
     }
   }
 
-  if (streamedResponse.startsWith('{"function_call":')) {
+  if (typeof responseMessage.function_call === 'string') {
     // Once the stream is complete, the function call is parsed into an object.
     const parsedFunctionCall: ChatCompletionRequestMessageFunctionCall =
-      JSON.parse(streamedResponse).function_call
+      JSON.parse(responseMessage.function_call).function_call
 
-    responseMessage['function_call'] = parsedFunctionCall
-
+    responseMessage.function_call = parsedFunctionCall
+    
     mutate([...chatRequest.messages, { ...responseMessage }])
   }
 
@@ -317,6 +321,14 @@ export function useChat({
 
       return triggerRequest(chatRequest)
     }
+      const chatRequest: ChatRequest = {
+      messages: messagesSnapshot,
+      options,
+      ...(functions !== undefined && { functions }),
+      ...(function_call !== undefined && { function_call })
+      }
+
+      return triggerRequest(chatRequest)
   }
 
   const stop = () => {
@@ -339,6 +351,7 @@ export function useChat({
     e.preventDefault()
     const inputValue = get(input)
     if (!inputValue) return
+
     append(
       {
       content: inputValue,
@@ -351,8 +364,8 @@ export function useChat({
 
   return {
     messages,
-    append,
     error,
+    append,
     reload,
     stop,
     setMessages,
